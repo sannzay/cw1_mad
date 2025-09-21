@@ -1,122 +1,249 @@
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
-  runApp(const MyApp());
+  WidgetsFlutterBinding.ensureInitialized();
+  runApp(MyApp());
 }
 
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+class MyApp extends StatefulWidget {
+  @override
+  State<MyApp> createState() => _MyAppState();
+}
 
-  // This widget is the root of your application.
+class _MyAppState extends State<MyApp> {
+  bool _isDarkMode = false;
+
+  void _setTheme(bool isDark) => setState(() => _isDarkMode = isDark);
+
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Flutter Demo',
-      theme: ThemeData(
-        // This is the theme of your application.
-        //
-        // TRY THIS: Try running your application with "flutter run". You'll see
-        // the application has a purple toolbar. Then, without quitting the app,
-        // try changing the seedColor in the colorScheme below to Colors.green
-        // and then invoke "hot reload" (save your changes or press the "hot
-        // reload" button in a Flutter-supported IDE, or press "r" if you used
-        // the command line to start the app).
-        //
-        // Notice that the counter didn't reset back to zero; the application
-        // state is not lost during the reload. To reset the state, use hot
-        // restart instead.
-        //
-        // This works for code too, not just values: Most code changes can be
-        // tested with just a hot reload.
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
-      ),
-      home: const MyHomePage(title: 'Flutter Demo Home Page'),
+      title: 'Counter + Image Toggle',
+      theme: ThemeData.light(),
+      darkTheme: ThemeData.dark(),
+      themeMode: _isDarkMode ? ThemeMode.dark : ThemeMode.light,
+      home: MyHomePage(onThemeChanged: _setTheme),
+      debugShowCheckedModeBanner: false,
     );
   }
 }
 
 class MyHomePage extends StatefulWidget {
-  const MyHomePage({super.key, required this.title});
+  final void Function(bool) onThemeChanged;
 
-  // This widget is the home page of your application. It is stateful, meaning
-  // that it has a State object (defined below) that contains fields that affect
-  // how it looks.
-
-  // This class is the configuration for the state. It holds the values (in this
-  // case the title) provided by the parent (in this case the App widget) and
-  // used by the build method of the State. Fields in a Widget subclass are
-  // always marked "final".
-
-  final String title;
+  const MyHomePage({Key? key, required this.onThemeChanged}) : super(key: key);
 
   @override
   State<MyHomePage> createState() => _MyHomePageState();
 }
 
-class _MyHomePageState extends State<MyHomePage> {
+class _MyHomePageState extends State<MyHomePage>
+    with SingleTickerProviderStateMixin {
+  static const String _kCounterKey = 'counter';
+  static const String _kIsImageOneKey = 'isImageOne';
+  static const String _kIsDarkModeKey = 'isDarkMode';
+
   int _counter = 0;
+  bool _isImageOne = true;
+  bool _isDarkMode = false;
+
+  late final AnimationController _controller;
+  late final Animation<double> _curvedAnimation;
+
+  @override
+  void initState() {
+    super.initState();
+
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 400),
+      value: 1.0,
+    );
+    _curvedAnimation =
+        CurvedAnimation(parent: _controller, curve: Curves.easeInOut);
+
+    _controller.addStatusListener((status) {
+      if (status == AnimationStatus.dismissed) {
+        setState(() => _isImageOne = !_isImageOne);
+        _saveImageState();
+        _controller.forward();
+      }
+    });
+
+    _loadState();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  String get _currentImageAsset => _isImageOne ? 'assets/image1.png' : 'assets/image2.png';
+
+  Future<void> _loadState() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      _counter = prefs.getInt(_kCounterKey) ?? 0;
+      _isImageOne = prefs.getBool(_kIsImageOneKey) ?? true;
+      _isDarkMode = prefs.getBool(_kIsDarkModeKey) ?? false;
+    });
+
+    widget.onThemeChanged(_isDarkMode);
+    _controller.value = 1.0;
+  }
+
+  Future<void> _saveState() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_kCounterKey, _counter);
+    await prefs.setBool(_kIsImageOneKey, _isImageOne);
+    await prefs.setBool(_kIsDarkModeKey, _isDarkMode);
+  }
+
+  Future<void> _saveImageState() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_kIsImageOneKey, _isImageOne);
+  }
+
+  Future<void> _saveCounter() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_kCounterKey, _counter);
+  }
+
+  Future<void> _saveTheme() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_kIsDarkModeKey, _isDarkMode);
+  }
 
   void _incrementCounter() {
-    setState(() {
-      // This call to setState tells the Flutter framework that something has
-      // changed in this State, which causes it to rerun the build method below
-      // so that the display can reflect the updated values. If we changed
-      // _counter without calling setState(), then the build method would not be
-      // called again, and so nothing would appear to happen.
-      _counter++;
-    });
+    setState(() => _counter++);
+    _saveCounter();
+  }
+
+  void _toggleImage() {
+    if (!_controller.isAnimating) {
+      _controller.reverse();
+    }
+  }
+
+  void _toggleTheme() {
+    setState(() => _isDarkMode = !_isDarkMode);
+    widget.onThemeChanged(_isDarkMode);
+    _saveTheme();
+  }
+
+  Future<void> _resetAll() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('Reset application?'),
+        content: const Text(
+            'This will reset the counter to 0, revert the image to the initial image, '
+            'and clear stored data. This action cannot be undone. Continue?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(c).pop(false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(c).pop(true),
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text('Reset'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.clear(); 
+
+      setState(() {
+        _counter = 0;
+        _isImageOne = true;
+        _isDarkMode = false;
+      });
+
+      widget.onThemeChanged(false);
+      _controller.value = 1.0;
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    // This method is rerun every time setState is called, for instance as done
-    // by the _incrementCounter method above.
-    //
-    // The Flutter framework has been optimized to make rerunning build methods
-    // fast, so that you can just rebuild anything that needs updating rather
-    // than having to individually change instances of widgets.
     return Scaffold(
       appBar: AppBar(
-        // TRY THIS: Try changing the color here to a specific color (to
-        // Colors.amber, perhaps?) and trigger a hot reload to see the AppBar
-        // change color while the other colors stay the same.
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-        // Here we take the value from the MyHomePage object that was created by
-        // the App.build method, and use it to set our appbar title.
-        title: Text(widget.title),
+        title: const Text('Counter + Image Toggle'),
+        centerTitle: true,
       ),
       body: Center(
-        // Center is a layout widget. It takes a single child and positions it
-        // in the middle of the parent.
-        child: Column(
-          // Column is also a layout widget. It takes a list of children and
-          // arranges them vertically. By default, it sizes itself to fit its
-          // children horizontally, and tries to be as tall as its parent.
-          //
-          // Column has various properties to control how it sizes itself and
-          // how it positions its children. Here we use mainAxisAlignment to
-          // center the children vertically; the main axis here is the vertical
-          // axis because Columns are vertical (the cross axis would be
-          // horizontal).
-          //
-          // TRY THIS: Invoke "debug painting" (choose the "Toggle Debug Paint"
-          // action in the IDE, or press "p" in the console), to see the
-          // wireframe for each widget.
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: <Widget>[
-            const Text('You have pushed the button this many times:'),
-            Text(
-              '$_counter',
-              style: Theme.of(context).textTheme.headlineMedium,
-            ),
-          ],
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 36),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Text(
+                'Counter',
+                style: Theme.of(context).textTheme.titleLarge,
+              ),
+              const SizedBox(height: 8),
+              Text(
+                '$_counter',
+                style: Theme.of(context).textTheme.displayMedium?.copyWith(fontWeight: FontWeight.w600),
+              ),
+              const SizedBox(height: 12),
+              ElevatedButton(
+                onPressed: _incrementCounter,
+                child: const Text('Increment'),
+              ),
+
+              const SizedBox(height: 28),
+
+              Text(
+                'Image',
+                style: Theme.of(context).textTheme.titleLarge,
+              ),
+              const SizedBox(height: 12),
+
+              SizedBox(
+                width: 240,
+                height: 240,
+                child: FadeTransition(
+                  opacity: _curvedAnimation,
+                  child: Image.asset(
+                    _currentImageAsset,
+                    fit: BoxFit.contain,
+                  ),
+                ),
+              ),
+
+              const SizedBox(height: 12),
+
+              Wrap(
+                spacing: 12,
+                runSpacing: 8,
+                alignment: WrapAlignment.center,
+                children: [
+                  ElevatedButton(
+                    onPressed: _toggleImage,
+                    child: const Text('Toggle Image'),
+                  ),
+                  ElevatedButton(
+                    onPressed: _toggleTheme,
+                    child: Text(_isDarkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'),
+                  ),
+                  ElevatedButton(
+                    onPressed: _resetAll,
+                    style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+                    child: const Text('Reset'),
+                  ),
+                ],
+              ),
+            ],
+          ),
         ),
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _incrementCounter,
-        tooltip: 'Increment',
-        child: const Icon(Icons.add),
-      ), // This trailing comma makes auto-formatting nicer for build methods.
     );
   }
 }
